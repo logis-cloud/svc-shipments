@@ -1,5 +1,5 @@
 const axios=require("axios");
-const VEHICULOS_SERVICE_URL=process.env.VEHICULOS_SERVICE_URL||"http://localhost:8002";
+const VEHICULOS_SERVICE_URL=process.env.VEHICULOS_SERVICE_URL||"http://localhost:8003";
 
 // Tamaño de página al pedir vehículos DISPONIBLES y tope de páginas a
 // recorrer como salvaguarda (evita loops largos si la flota es enorme y

@@ -6,7 +6,7 @@ const swaggerSpec = require("./config/swagger");
 const enviosRoutes = require("./routes/envios.routes");
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
