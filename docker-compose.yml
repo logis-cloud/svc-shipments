@@ -1,36 +1,18 @@
-services:
-  mongodb-envios:
-    image: mongo:7
-    container_name: mongodb-envios
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: root123
-      MONGO_INITDB_DATABASE: envios_db
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_envios_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 5s
-      timeout: 5s
-      retries: 15
+version: '3.8'
 
+services:
   ms-envios:
     build: .
     container_name: ms-envios
     restart: unless-stopped
-    environment:
-      PORT: "8080"
-      MONGODB_URI: mongodb://root:root123@mongodb-envios:27017/envios_db?authSource=admin
-      CLIENTES_SERVICE_URL: ${CLIENTES_SERVICE_URL:-http://host.docker.internal:8001}
-      VEHICULOS_SERVICE_URL: ${VEHICULOS_SERVICE_URL:-http://host.docker.internal:8002}
+    env_file:
+      - .env
+    # Solo necesario para pruebas en local en Linux, donde MONGODB_URI /
+    # CLIENTES_SERVICE_URL / VEHICULOS_SERVICE_URL apuntan a
+    # host.docker.internal. En producción (VM de prod) las URLs de .env
+    # apuntan a la IP privada de la VM3 (bases de datos) y a las IPs/DNS
+    # de los otros dos microservicios, así que este extra_hosts es inofensivo.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8003:8080"
-    depends_on:
-      mongodb-envios:
-        condition: service_healthy
-
-volumes:
-  mongodb_envios_data:

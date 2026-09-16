@@ -107,21 +107,33 @@ Respuestas de error relevantes:
 | 409 | No hay ningún vehículo `DISPONIBLE` con conductor activo en ms-vehiculos |
 | 502 | ms-clientes o ms-vehiculos no respondieron (caído o inalcanzable) |
 
-## Ejecutar localmente
-Primero deben estar corriendo MS Clientes (puerto 8001) y MS Vehículos (puerto 8002). Luego:
-```bash
-docker compose up --build
-```
+## Cómo correrlo en local
+
+Este `docker-compose.yml` **solo levanta el microservicio**, no la base de datos —
+mismo criterio que `svc-clientes` y `svc-vehiculos`: MongoDB vive en la VM de
+bases de datos (VM3), no en el docker-compose de la API.
+
+1. Copia `.env.example` a `.env` y ajusta `MONGODB_URI` para que apunte a un
+   Mongo accesible (local, o la IP privada de la VM3 si ya está levantada).
+2. Asegúrate de que `ms-clientes` (puerto 8001) y `ms-vehiculos` (puerto 8002)
+   estén corriendo y accesibles en las URLs de tu `.env`.
+3. Levanta el microservicio:
+   ```bash
+   docker compose up --build
+   ```
+
 API: `http://localhost:8003`
 
-Variables de entorno relevantes (ver `.env.example`): `CLIENTES_SERVICE_URL` y `VEHICULOS_SERVICE_URL`, ambas apuntando a `http://host.docker.internal:PUERTO` en local o a la IP privada / balanceador correspondiente en producción.
+## Carga masiva (≥20,000 registros)
 
-## Carga masiva
-El enunciado pide mínimo 20,000 registros/documentos. Este proyecto genera **25,000 envíos**:
-```bash
-docker compose run --rm ms-envios npm run seed
-```
-El seed genera `vehiculoAsignado`/`conductorAsignado` con valores plausibles pero aleatorios (no llama a ms-vehiculos): es solo para cumplir el volumen de datos, no para validar la integración real — eso ya lo cubre el flujo normal de `POST /envios`.
+**No se hace desde este microservicio.** Igual que en Clientes y Vehículos,
+la carga masiva de documentos de prueba corre desde la herramienta externa
+`seed-tool/`, que se conecta directamente a MongoDB por su IP privada (VM de
+bases de datos), sin pasar por la API de `ms-envios`.
+
+Este microservicio se mantiene como una API estándar (rutas → controller →
+service → modelo), sin scripts ni endpoints de generación de datos falsos
+en su código fuente ni en su imagen Docker.
 
 ## Arquitectura interna
 ```text
@@ -144,7 +156,8 @@ model
 ```
 
 ## Producción
-- ms-envios se despliega con Docker Compose en las 2 MV de producción.
-- MongoDB debe estar en la tercera MV privada.
-- La API queda detrás del balanceador privado y se publica por AWS API Gateway HTTPS.
-- MongoDB no debe exponerse a Internet.
+- `ms-envios` se despliega junto a `ms-clientes` y `ms-vehiculos` en las
+  2 VMs de producción, detrás del balanceador privado.
+- MongoDB corre en la tercera VM (privada, no pública), junto con MySQL
+  (Clientes) y PostgreSQL (Vehículos). MongoDB no debe exponerse a Internet.
+- La API se publica solo a través de AWS API Gateway (HTTPS).
