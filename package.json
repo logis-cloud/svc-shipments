@@ -1,5 +1,5 @@
 {
-  "name": "ms-envios",
+  "name": "ms-shipments",
   "version": "1.0.0",
   "description": "Microservicio NoSQL de envíos para centro logístico",
   "main": "src/app.js",
