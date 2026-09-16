@@ -25,6 +25,7 @@ services:
       PORT: "8080"
       MONGODB_URI: mongodb://root:root123@mongodb-envios:27017/envios_db?authSource=admin
       CLIENTES_SERVICE_URL: ${CLIENTES_SERVICE_URL:-http://host.docker.internal:8001}
+      VEHICULOS_SERVICE_URL: ${VEHICULOS_SERVICE_URL:-http://host.docker.internal:8002}
     ports:
       - "8003:8080"
     depends_on:

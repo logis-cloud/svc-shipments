@@ -22,8 +22,6 @@ const router=express.Router();
  *         items:
  *           type: array
  *           items: { $ref: '#/components/schemas/PaqueteItem' }
- *         transportista: { type: string, example: Logística Express }
- *         placaVehiculo: { type: string, example: ABC-123 }
  */
 /**
  * @swagger
@@ -33,14 +31,21 @@ const router=express.Router();
  *     tags: [Envios]
  *     responses: { 200: { description: Lista paginada de envíos } }
  *   post:
- *     summary: Crea un envío consultando la dirección del microservicio de Clientes
+ *     summary: >
+ *       Crea un envío. La dirección de entrega se toma de ms-clientes
+ *       (dirección principal del cliente) y el vehículo/conductor se
+ *       asignan automáticamente desde ms-vehiculos (primer vehículo
+ *       DISPONIBLE con conductor activo) — no se envían en el body.
  *     tags: [Envios]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema: { $ref: '#/components/schemas/EnvioCreate' }
- *     responses: { 201: { description: Envío creado } }
+ *     responses:
+ *       201: { description: Envío creado }
+ *       404: { description: Cliente no encontrado o sin dirección registrada }
+ *       409: { description: No hay vehículos disponibles con conductor activo }
  */
 router.get("/",controller.listar); router.post("/",controller.crear);
 /**
