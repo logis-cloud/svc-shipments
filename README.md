@@ -57,13 +57,12 @@ Colección: `envios`
 Al crear un envío, `ms-envios` consulta a **dos** microservicios (así se cumple el requisito de integración entre servicios):
 
 1. **Clientes** — `GET /clientes/{clienteId}/direcciones`, para tomar la dirección principal (o la primera, si no hay ninguna marcada como principal) y copiarla en `direccionEntrega`.
-2. **Vehículos** — se asigna automáticamente el **primer vehículo en estado `DISPONIBLE` que tenga al menos un conductor activo**:
+2. **Vehículos** — se asigna automáticamente un par **vehículo `DISPONIBLE` + conductor activo**, sin cambiar el JSON del envío:
    - `GET /vehiculos?estado=DISPONIBLE` (paginado, recorre páginas si hace falta).
    - Para cada vehículo candidato, `GET /vehiculos/{id}/conductores`, filtrando `activo: true` **del lado de `ms-envios`** — no en `ms-vehiculos`, porque su filtro de listado (`ConductorServiceImpl.listar`) solo aplica un criterio a la vez (`turno` **o** `idVehiculo` **o** `activo`, nunca combinados), así que no se puede pedir "los conductores activos de este vehículo" en una sola llamada filtrada por ambos.
-   - El primer par (vehículo, conductor activo) encontrado se asigna y queda congelado en `vehiculoAsignado` / `conductorAsignado`.
-   - Si no hay ningún vehículo disponible con conductor activo, el POST responde **409**.
-
-No hay lógica adicional de selección (ni por capacidad de carga, ni por turno específico): se mantiene simple a propósito, ya que la asignación por disponibilidad es suficiente para demostrar la integración entre los tres microservicios.
+   - Entre esos pares se elige el de **menos envíos abiertos** (estado distinto de `ENTREGADO` / `CANCELADO`). Además hay un **tope diario por par** (por defecto 15, `TOPE_ENVIOS_POR_PAR_POR_DIA`), contado con `fechaCreacion` del día local (`ASSIGNMENT_TZ_OFFSET_HOURS`, por defecto Lima UTC−5). Si un par ya llegó al tope, no recibe más envíos ese día.
+   - El par elegido queda congelado en `vehiculoAsignado` / `conductorAsignado`.
+   - El POST responde **409** si no hay ningún vehículo disponible con conductor activo, o si todos los pares ya alcanzaron el tope del día.
 
 > El microservicio de **Tracking** (4to MS) no repite esta lógica: consulta a Envíos para el snapshot histórico y a Clientes/Vehículos para el estado *actual*, cruzando ambos — nunca crea ni asigna nada.
 

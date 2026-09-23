@@ -34,8 +34,9 @@ const router=express.Router();
  *     summary: >
  *       Crea un envío. La dirección de entrega se toma de ms-clientes
  *       (dirección principal del cliente) y el vehículo/conductor se
- *       asignan automáticamente desde ms-vehiculos (primer vehículo
- *       DISPONIBLE con conductor activo) — no se envían en el body.
+ *       asignan automáticamente: vehículo DISPONIBLE con conductor activo,
+ *       eligiendo el par con menos envíos abiertos y un tope diario por par
+ *       (TOPE_ENVIOS_POR_PAR_POR_DIA, por defecto 15) — no se envían en el body.
  *     tags: [Envios]
  *     requestBody:
  *       required: true
@@ -45,7 +46,7 @@ const router=express.Router();
  *     responses:
  *       201: { description: Envío creado }
  *       404: { description: Cliente no encontrado o sin dirección registrada }
- *       409: { description: No hay vehículos disponibles con conductor activo }
+ *       409: { description: No hay vehículos disponibles con conductor activo, o todos los pares alcanzaron el tope diario }
  */
 router.get("/",controller.listar); router.post("/",controller.crear);
 /**

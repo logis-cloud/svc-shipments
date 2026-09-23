@@ -43,10 +43,30 @@ async function obtenerConductoresDeVehiculo(idVehiculo){
   }
 }
 
+function snapshotPar(vehiculo, conductor){
+  return {
+    vehiculoAsignado:{
+      idVehiculo:vehiculo.id,
+      placa:vehiculo.placa,
+      tipo:vehiculo.tipo,
+      marca:vehiculo.marca,
+      modelo:vehiculo.modelo
+    },
+    conductorAsignado:{
+      idConductor:conductor.id,
+      nombre:conductor.nombre,
+      apellido:conductor.apellido,
+      dni:conductor.dni,
+      turno:conductor.turno
+    }
+  };
+}
+
 /**
- * Recorre los vehículos en estado DISPONIBLE (paginados, ordenados por id)
- * y para cada uno pide sus conductores asignados, devolviendo el primer par
- * (vehículo, conductor activo) que encuentra.
+ * Recorre los vehículos en estado DISPONIBLE (paginados) y para cada uno
+ * pide sus conductores asignados. Devuelve TODOS los pares
+ * (vehículo, conductor activo) — la elección (carga / tope diario) la
+ * hace ms-envios con los envíos ya guardados.
  *
  * El filtro por "activo" se hace acá, del lado de Node, a propósito:
  * ConductorServiceImpl.listar() en ms-vehiculos resuelve sus filtros
@@ -56,11 +76,12 @@ async function obtenerConductoresDeVehiculo(idVehiculo){
  * (sin filtro, trae todos los conductores de ese vehículo) y se filtra
  * "activo" acá mismo.
  *
- * Devuelve null si no hay ningún vehículo disponible con conductor activo.
+ * Devuelve [] si no hay ningún vehículo disponible con conductor activo.
  */
-async function asignarVehiculoDisponible(){
+async function listarParesDisponibles(){
   let page=0;
   let totalPages=1;
+  const pares=[];
 
   while(page<totalPages && page<MAX_PAGINAS){
     const resultado=await obtenerVehiculosDisponibles(page);
@@ -69,29 +90,13 @@ async function asignarVehiculoDisponible(){
 
     for(const vehiculo of vehiculos){
       const conductores=await obtenerConductoresDeVehiculo(vehiculo.id);
-      const conductorActivo=(conductores||[]).find(c=>c.activo===true);
-      if(conductorActivo){
-        return {
-          vehiculoAsignado:{
-            idVehiculo:vehiculo.id,
-            placa:vehiculo.placa,
-            tipo:vehiculo.tipo,
-            marca:vehiculo.marca,
-            modelo:vehiculo.modelo
-          },
-          conductorAsignado:{
-            idConductor:conductorActivo.id,
-            nombre:conductorActivo.nombre,
-            apellido:conductorActivo.apellido,
-            dni:conductorActivo.dni,
-            turno:conductorActivo.turno
-          }
-        };
+      for(const conductor of conductores||[]){
+        if(conductor.activo===true) pares.push(snapshotPar(vehiculo, conductor));
       }
     }
     page++;
   }
-  return null;
+  return pares;
 }
 
-module.exports={asignarVehiculoDisponible};
+module.exports={listarParesDisponibles};
