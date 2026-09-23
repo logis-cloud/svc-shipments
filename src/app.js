@@ -4,6 +4,7 @@ const { connectMongo } = require("./config/database");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swagger");
 const enviosRoutes = require("./routes/envios.routes");
+const healthRoutes = require("./routes/health.routes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,7 @@ app.use(
 app.use(express.json());
 
 app.get("/", (req, res) => res.json({ status: "ok", service: "ms-envios", database: "mongodb" }));
+app.use("/health", healthRoutes);
 app.use("/envios", enviosRoutes);
 app.use("/swagger-ui", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
