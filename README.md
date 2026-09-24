@@ -1,19 +1,55 @@
 # Microservicio de Envíos — Sistema de Logística y Entregas
 
-API REST desarrollada con **Node.js + Express + MongoDB** para gestionar los envíos de un centro logístico.
+## Descripción del microservicio
 
-Microservicios con base de datos propia:
-- Clientes → Python + MySQL
-- Vehículos → Java + PostgreSQL
-- **Envíos → Node.js + MongoDB**
+El **Microservicio de Envíos** es una API REST responsable de gestionar el ciclo operativo de los envíos dentro del sistema de logística y entregas.
 
-## Estructura JSON de MongoDB
+Está desarrollado con **Node.js + Express** y utiliza **MongoDB** como base de datos NoSQL mediante **Mongoose**. A diferencia de los microservicios de Clientes y Vehículos, que utilizan bases de datos relacionales, Envíos almacena cada envío como un documento que contiene información propia y snapshots de los datos necesarios para conservar el contexto histórico de la operación.
 
-Colección: `envios`
+Durante la creación de un envío, el microservicio consume las APIs REST de otros servicios del sistema:
+
+- **Clientes:** consulta las direcciones registradas del cliente y utiliza la dirección principal o, en su defecto, la primera disponible.
+- **Vehículos:** consulta los vehículos disponibles y sus conductores para realizar una asignación automática.
+
+La comunicación se realiza exclusivamente mediante los endpoints expuestos por cada API REST, sin acceder directamente a las bases de datos de otros microservicios.
+
+La asignación de vehículo y conductor considera únicamente pares con vehículo disponible y conductor activo. Entre los candidatos se selecciona el par con menor carga de envíos abiertos, respetando además un límite diario configurable. Una vez creado el envío, la dirección, el vehículo y el conductor quedan almacenados como **snapshots**, preservando la información histórica aunque posteriormente cambien los datos originales.
+
+---
+
+## Modelo documental (MongoDB)
+
+La información se almacena en la colección:
+
+```text
+envios
+```
+
+Cada documento representa un envío completo y contiene estructuras embebidas para la dirección de entrega, los productos, el vehículo asignado y el conductor asignado.
+
+```mermaid
+flowchart TB
+    ENVIO["envios<br/><br/>_id<br/>codigoSeguimiento<br/>clienteId<br/>pedidoId<br/>estado<br/>fechaCreacion<br/>fechaActualizacion"]
+
+    DIRECCION["direccionEntrega<br/><br/>calle<br/>distrito<br/>ciudad<br/>codigoPostal<br/>referencia"]
+
+    ITEMS["items [ ]<br/><br/>sku<br/>descripcion<br/>cantidad<br/>pesoKg"]
+
+    VEHICULO["vehiculoAsignado<br/><br/>idVehiculo<br/>placa<br/>tipo<br/>marca<br/>modelo"]
+
+    CONDUCTOR["conductorAsignado<br/><br/>idConductor<br/>nombre<br/>apellido<br/>dni<br/>turno"]
+
+    ENVIO --> DIRECCION
+    ENVIO --> ITEMS
+    ENVIO --> VEHICULO
+    ENVIO --> CONDUCTOR
+```
+
+### Estructura general del documento
 
 ```json
 {
-  "_id": "ObjectId(...)",
+  "_id": "ObjectId",
   "codigoSeguimiento": "LOG-A12BC34D",
   "clienteId": 15,
   "pedidoId": "PED-1001",
@@ -25,12 +61,14 @@ Colección: `envios`
     "codigoPostal": "15036",
     "referencia": "Frente al parque"
   },
-  "items": [{
-    "sku": "SKU-001",
-    "descripcion": "Laptop Lenovo",
-    "cantidad": 2,
-    "pesoKg": 3.5
-  }],
+  "items": [
+    {
+      "sku": "SKU-001",
+      "descripcion": "Monitor 27 pulgadas",
+      "cantidad": 1,
+      "pesoKg": 5.5
+    }
+  ],
   "vehiculoAsignado": {
     "idVehiculo": 101,
     "placa": "ABC-123",
@@ -43,120 +81,188 @@ Colección: `envios`
     "nombre": "Carlos",
     "apellido": "Pérez",
     "dni": "45678912",
-    "turno": "MANANA"
+    "turno": "TARDE"
   },
-  "fechaCreacion": "2026-09-09T10:00:00Z",
-  "fechaActualizacion": "2026-09-09T10:00:00Z"
+  "fechaCreacion": "2026-09-19T17:35:36.000Z",
+  "fechaActualizacion": "2026-09-19T20:20:19.000Z"
 }
 ```
 
-**Estructura:** 1 envío contiene 1 dirección de entrega embebida, una lista de N ítems, y el vehículo + conductor que lo transportan — los tres son *snapshots* (copias congeladas al momento de crear el envío), no referencias vivas: si el cliente cambia de dirección o el conductor deja de estar activo después, el envío ya creado conserva el dato histórico.
+`codigoSeguimiento` es único e indexado. También se indexan `clienteId` y `estado` para facilitar las consultas operativas.
 
-## Consumo de otros microservicios
+La dirección de entrega, el vehículo y el conductor se almacenan como **copias históricas embebidas**, no como referencias vivas a otros microservicios.
 
-Al crear un envío, `ms-envios` consulta a **dos** microservicios (así se cumple el requisito de integración entre servicios):
+---
 
-1. **Clientes** — `GET /clientes/{clienteId}/direcciones`, para tomar la dirección principal (o la primera, si no hay ninguna marcada como principal) y copiarla en `direccionEntrega`.
-2. **Vehículos** — se asigna automáticamente un par **vehículo `DISPONIBLE` + conductor activo**, sin cambiar el JSON del envío:
-   - `GET /vehiculos?estado=DISPONIBLE` (paginado, recorre páginas si hace falta).
-   - Para cada vehículo candidato, `GET /vehiculos/{id}/conductores`, filtrando `activo: true` **del lado de `ms-envios`** — no en `ms-vehiculos`, porque su filtro de listado (`ConductorServiceImpl.listar`) solo aplica un criterio a la vez (`turno` **o** `idVehiculo` **o** `activo`, nunca combinados), así que no se puede pedir "los conductores activos de este vehículo" en una sola llamada filtrada por ambos.
-   - Entre esos pares se elige el de **menos envíos abiertos** (estado distinto de `ENTREGADO` / `CANCELADO`). Además hay un **tope diario por par** (por defecto 15, `TOPE_ENVIOS_POR_PAR_POR_DIA`), contado con `fechaCreacion` del día local (`ASSIGNMENT_TZ_OFFSET_HOURS`, por defecto Lima UTC−5). Si un par ya llegó al tope, no recibe más envíos ese día.
-   - El par elegido queda congelado en `vehiculoAsignado` / `conductorAsignado`.
-   - El POST responde **409** si no hay ningún vehículo disponible con conductor activo, o si todos los pares ya alcanzaron el tope del día.
+## Principales endpoints
 
-> El microservicio de **Tracking** (4to MS) no repite esta lógica: consulta a Envíos para el snapshot histórico y a Clientes/Vehículos para el estado *actual*, cruzando ambos — nunca crea ni asigna nada.
+### Envíos
 
-## Endpoints
-
-| Método | Ruta | Descripción |
+| Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/` | Health check |
-| GET | `/envios` | Lista paginada de envíos |
-| GET | `/envios/{id}` | Obtiene un envío por ID |
-| GET | `/envios/tracking/{codigo}` | Consulta por tracking |
-| POST | `/envios` | Crea un envío: toma dirección de MS Clientes y asigna vehículo/conductor de MS Vehículos automáticamente |
-| PUT | `/envios/{id}/estado` | Actualiza el estado |
-| DELETE | `/envios/{id}` | Elimina un envío |
+| `GET` | `/envios` | Lista los envíos de forma paginada. Permite filtrar por estado y cliente. |
+| `GET` | `/envios/{id}` | Obtiene el detalle de un envío por su identificador interno. |
+| `GET` | `/envios/tracking/{codigo}` | Obtiene un envío mediante su código de seguimiento. |
+| `POST` | `/envios` | Registra un nuevo envío y realiza automáticamente la asignación de dirección, vehículo y conductor. |
+| `PUT` | `/envios/{id}/estado` | Actualiza el estado de un envío. |
+| `DELETE` | `/envios/{id}` | Elimina un envío. |
 
-Swagger: `http://localhost:8003/swagger-ui`
+### Estado del servicio
 
-## Ejemplo POST
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/` | Verifica que el microservicio se encuentre operativo. |
+| `GET` | `/health` | Health check utilizado para verificar la disponibilidad del servicio. |
 
-```json
-{
-  "clienteId": 1,
-  "pedidoId": "PED-1001",
-  "items": [{
-    "sku": "SKU-001",
-    "descripcion": "Monitor 27 pulgadas",
-    "cantidad": 1,
-    "pesoKg": 5.5
-  }]
-}
-```
+### Documentación de la API
 
-No se envía `vehiculoAsignado`/`conductorAsignado` ni nada relacionado: se asignan solos.
+La documentación interactiva se encuentra disponible en:
 
-Respuestas de error relevantes:
-
-| Código | Cuándo ocurre |
-|---|---|
-| 400 | Faltan `clienteId`, `pedidoId` o `items` |
-| 404 | El cliente no existe, o no tiene ninguna dirección registrada en ms-clientes |
-| 409 | No hay ningún vehículo `DISPONIBLE` con conductor activo en ms-vehiculos |
-| 502 | ms-clientes o ms-vehiculos no respondieron (caído o inalcanzable) |
-
-## Cómo correrlo en local
-
-Este `docker-compose.yml` **solo levanta el microservicio**, no la base de datos —
-mismo criterio que `svc-clientes` y `svc-vehiculos`: MongoDB vive en la VM de
-bases de datos (VM3), no en el docker-compose de la API.
-
-1. Copia `.env.example` a `.env` y ajusta `MONGODB_URI` para que apunte a un
-   Mongo accesible (local, o la IP privada de la VM3 si ya está levantada).
-2. Asegúrate de que `ms-clientes` (puerto 8001) y `ms-vehiculos` (puerto 8002)
-   estén corriendo y accesibles en las URLs de tu `.env`.
-3. Levanta el microservicio:
-   ```bash
-   docker compose up --build
-   ```
-
-API: `http://localhost:8003`
-
-## Carga masiva (≥20,000 registros)
-
-**No se hace desde este microservicio.** Igual que en Clientes y Vehículos,
-la carga masiva de documentos de prueba corre desde la herramienta externa
-`seed-tool/`, que se conecta directamente a MongoDB por su IP privada (VM de
-bases de datos), sin pasar por la API de `ms-envios`.
-
-Este microservicio se mantiene como una API estándar (rutas → controller →
-service → modelo), sin scripts ni endpoints de generación de datos falsos
-en su código fuente ni en su imagen Docker.
-
-## Arquitectura interna
 ```text
-Petición HTTP
-     |
-     v
-routes
-     |
-     v
-controller
-     |
-     v
-service
-   /   |   \
-  v    v    v
-MongoDB MS-Clientes MS-Vehiculos
-  ^
-  |
-model
+/swagger-ui
 ```
 
-## Producción
-- `ms-envios` se despliega junto a `ms-clientes` y `ms-vehiculos` en las
-  2 VMs de producción, detrás del balanceador privado.
-- MongoDB corre en la tercera VM (privada, no pública), junto con MySQL
-  (Clientes) y PostgreSQL (Vehículos). MongoDB no debe exponerse a Internet.
-- La API se publica solo a través de AWS API Gateway (HTTPS).
+y también en:
+
+```text
+/docs
+```
+
+### Integración utilizada al crear un envío
+
+El `POST /envios` utiliza las APIs REST de Clientes y Vehículos:
+
+```text
+GET /clientes/{clienteId}/direcciones
+GET /vehiculos?estado=DISPONIBLE
+GET /vehiculos/{id}/conductores
+```
+
+El microservicio no consulta directamente MySQL ni PostgreSQL. La información externa se obtiene a través de los endpoints publicados por los microservicios propietarios de esos datos.
+
+---
+
+## Tecnologías
+
+| Tecnología | Uso |
+|---|---|
+| **Node.js** | Entorno de ejecución del microservicio. |
+| **Express** | Implementación de la API REST y definición de rutas. |
+| **MongoDB** | Base de datos NoSQL utilizada para persistir los envíos. |
+| **Mongoose** | Modelado, validación y acceso a los documentos almacenados en MongoDB. |
+| **Axios** | Consumo HTTP de los microservicios de Clientes y Vehículos. |
+| **Swagger / OpenAPI** | Documentación interactiva de la API. |
+| **CORS** | Control de los orígenes autorizados para consumir la API. |
+| **Docker** | Empaquetado y ejecución del microservicio en contenedores. |
+
+---
+
+## Documentación Docker
+
+El microservicio se encuentra preparado para ejecutarse dentro de un contenedor Docker utilizando una imagen basada en **Node.js Alpine**.
+
+### 1. Variables de entorno
+
+Crear un archivo `.env` a partir de `.env.example` y configurar los valores de acuerdo con el entorno de ejecución:
+
+```env
+PORT=8080
+
+MONGODB_URI=mongodb://usuario:password@HOST_MONGODB:27017/shipments_db?authSource=admin
+
+CLIENTES_SERVICE_URL=http://HOST_CLIENTES:8001
+VEHICULOS_SERVICE_URL=http://HOST_VEHICULOS:8002
+
+TOPE_ENVIOS_POR_PAR_POR_DIA=15
+ASSIGNMENT_TZ_OFFSET_HOURS=-5
+
+CORS_ALLOWED_ORIGINS=*
+```
+
+### Variables principales
+
+| Variable | Descripción |
+|---|---|
+| `PORT` | Puerto interno en el que escucha la API. |
+| `MONGODB_URI` | Cadena de conexión a MongoDB. |
+| `CLIENTES_SERVICE_URL` | URL base del microservicio de Clientes. |
+| `VEHICULOS_SERVICE_URL` | URL base del microservicio de Vehículos. |
+| `TOPE_ENVIOS_POR_PAR_POR_DIA` | Límite diario de envíos asignables a cada par vehículo-conductor. |
+| `ASSIGNMENT_TZ_OFFSET_HOURS` | Desfase horario utilizado para calcular el día operativo de la asignación. |
+| `CORS_ALLOWED_ORIGINS` | Orígenes autorizados para consumir la API. |
+
+> Las URLs de los microservicios y de MongoDB deben configurarse de acuerdo con la red del entorno. En producción deben utilizarse las direcciones internas correspondientes y no conexiones directas desde Internet hacia las bases de datos.
+
+### 2. Construir la imagen
+
+Desde la raíz del repositorio:
+
+```bash
+docker build -t svc-shipments .
+```
+
+### 3. Ejecutar el contenedor
+
+Con la configuración de ejemplo donde la API escucha en el puerto interno `8080`:
+
+```bash
+docker run -d \
+  --name ms-envios \
+  --env-file .env \
+  -p 8003:8080 \
+  svc-shipments
+```
+
+El puerto `8003` corresponde al acceso desde el host y `8080` al puerto configurado para la aplicación dentro del contenedor.
+
+### 4. Verificar el servicio
+
+API:
+
+```text
+http://localhost:8003/
+```
+
+Health check:
+
+```text
+http://localhost:8003/health
+```
+
+Swagger UI:
+
+```text
+http://localhost:8003/swagger-ui
+```
+
+Documentación alternativa:
+
+```text
+http://localhost:8003/docs
+```
+
+### 5. Comandos útiles
+
+Verificar el contenedor:
+
+```bash
+docker ps
+```
+
+Revisar logs:
+
+```bash
+docker logs ms-envios
+```
+
+Detener el contenedor:
+
+```bash
+docker stop ms-envios
+```
+
+Eliminar el contenedor:
+
+```bash
+docker rm ms-envios
+```
